@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>Apex Drive · Relay test</title>
+    <style>
+      body { max-width: 56rem; padding: 1rem; margin: auto; font: 1rem/1.5 system-ui, sans-serif; color-scheme: light dark; }
+      input, button, select { font: inherit; padding: .3rem .55rem; }
+      pre, .table { overflow-x: auto; } table { border-collapse: collapse; }
+      th, td { padding: .4rem; text-align: left; border-bottom: 1px solid gray; white-space: nowrap; }
+      form, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Apex Drive relay test</h1>
+      <div id="lobby">
+        <button id="create" type="button">Create room</button>
+        <form id="join">
+          <label for="code">Invite code</label>
+          <input id="code" required maxlength="9" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX">
+          <button id="join-button">Join room</button>
+        </form>
+      </div>
+      <p id="status" role="status">Create or join a room.</p>
+      <section id="room" hidden aria-label="Active room">
+        <div class="actions">
+          <strong id="invite"></strong> <button id="copy" type="button">Copy invite</button>
+          <label for="rate">Send rate</label>
+          <select id="rate"><option>10</option><option selected>15</option><option>20</option></select>
+          <button id="reconnect" type="button">Test reconnect</button>
+          <button id="leave" type="button">Leave room</button>
+        </div>
+        <p id="presence"></p>
+        <pre id="pose">Waiting for peer snapshots</pre>
+      </section>
+      <h2>Measurements</h2>
+      <div class="actions">
+        <button id="probe" type="button">Check HTTPS</button>
+        <button id="reset" type="button">Reset measurements</button>
+        <button id="export" type="button">Download JSON</button>
+      </div>
+      <p id="summary"></p>
+      <div class="table">
+        <table>
+          <thead><tr><th>Peer rate</th><th>Received</th><th>p50 / p95 interval</th><th>p95 jitter</th><th>Gaps</th><th>Missing seq.</th><th>Stale time</th></tr></thead>
+          <tbody id="rate-rows"></tbody>
+        </table>
+      </div>
+      <p>Jitter is absolute deviation from the nominal interval. A gap starts after three nominal intervals. Reconnects are recorded separately.</p>
+    </main>
+    <script type="module" src="/src/client.ts"></script>
+  </body>
+</html>

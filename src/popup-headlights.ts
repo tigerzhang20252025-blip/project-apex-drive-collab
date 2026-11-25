@@ -3,8 +3,6 @@ import {RoundedBoxGeometry} from 'three/addons/geometries/RoundedBoxGeometry.js'
 
 const openAngle=.80;
 const seconds=.73;
-const steel=new T.MeshStandardMaterial({color:0x343737,metalness:.73,roughness:.46});
-const recess=new T.MeshStandardMaterial({color:0x222021,roughness:.93});
 function flutedGlass(){
   const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;
   const ctx=canvas.getContext('2d')!,gradient=ctx.createLinearGradient(0,0,0,256);
@@ -23,11 +21,13 @@ export class PopupHeadlights{
   requested=false;
   private progress=0;
   private previous=0;
-  private readonly units:Array<{pivot:T.Group;beam:T.SpotLight;bulb:T.MeshStandardMaterial}>=[];
+  private readonly units:Array<{pivot:T.Group;beam:T.SpotLight|null;bulb:T.MeshStandardMaterial}>=[];
   get extension(){return this.progress;}
   get moving(){return this.progress>0&&this.progress<1;}
 
-  constructor(body:T.Group){
+  constructor(body:T.Group,projectLight=true){
+    const steel=new T.MeshStandardMaterial({color:0x343737,metalness:.73,roughness:.46});
+    const recess=new T.MeshStandardMaterial({color:0x222021,roughness:.93});
     const lensMap=flutedGlass();
     const axle=new T.Vector3(1,0,0);
     for(const [side,suffix] of [[-1,'L'],[1,'R']] as const){
@@ -69,10 +69,12 @@ export class PopupHeadlights{
         const screw=new T.Mesh(new T.CylinderGeometry(.0026,.0026,.0024,8).rotateX(Math.PI/2),recess);
         screw.position.set(x,.039,-.029);optics.add(screw);
       }
-      const beam=new T.SpotLight(0xffe4bb,0,85,.22,.57,1.32);
-      beam.position.set(side*.697,.683,-1.86);
-      beam.target.position.set(side*2.1,-.6,-35);
-      body.add(beam,beam.target);
+      const beam=projectLight?new T.SpotLight(0xffe4bb,0,85,.22,.57,1.32):null;
+      if(beam){
+        beam.position.set(side*.697,.683,-1.86);
+        beam.target.position.set(side*2.1,-.6,-35);
+        body.add(beam,beam.target);
+      }
       this.units.push({pivot,beam,bulb});
     }
   }
@@ -91,7 +93,7 @@ export class PopupHeadlights{
     for(const {pivot,beam,bulb} of this.units){
       pivot.rotation.x=angle;
       bulb.emissiveIntensity=2.7*light;
-      beam.intensity=290*light;
+      if(beam)beam.intensity=290*light;
     }
   }
 }

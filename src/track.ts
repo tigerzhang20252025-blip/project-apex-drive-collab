@@ -44,6 +44,7 @@ export type Station=typeof stations[number];
 export const startLine=sampleAt(lineDistance);
 const gridStation=sampleAt(lineDistance-58);
 export const grid=gridStation.p.clone().addScaledVector(gridStation.right,1.85);
+export const oppositeGrid=gridStation.p.clone().addScaledVector(gridStation.right,-1.85);
 const yaw=Math.atan2(-gridStation.forward.x,-gridStation.forward.z);
 export const gridRotation={x:0,y:Math.sin(yaw/2),z:0,w:Math.cos(yaw/2)};
 

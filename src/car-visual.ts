@@ -9,6 +9,7 @@ import {Driver} from './driver.ts';
 import {Mirrors} from './mirrors.ts';
 import {asset} from './environment.ts';
 import {buildCabin,type Switch} from './f40-cabin.ts';
+import {lightFlags} from '../multiplayer-poc/src/game.ts';
 import type {Vehicle} from './vehicle.ts';
 export type {Switch};
 export class CarVisual {
@@ -30,7 +31,7 @@ export class CarVisual {
   private ray=new T.Raycaster();
   private spec:Vehicle['spec'];
   constructor(spec:Vehicle['spec']){this.spec=spec;this.eye.y-=spec.bodyOrigin;this.hood.y-=spec.bodyOrigin;}
-  async load(){
+  async load(exteriorOnly=false){
     const {scene:body}=await new GLTFLoader().loadAsync(asset('f40-road.glb'));
     const {spec}=this;body.position.y=-spec.bodyOrigin;this.group.add(body);
     const red=new T.MeshPhysicalMaterial({color:0xc52118,metalness:.035,roughness:.31,clearcoat:.95,clearcoatRoughness:.19,ior:1.49});
@@ -48,7 +49,7 @@ export class CarVisual {
       const wheel=/^(tire|rim|disc)(FL|FR|RL|RR)/.exec(mesh.name);
       // Hidden from the seated eye by the bodywork, retained in exterior views.
       if(wheel||['part1','part5','part6','part22','part26','part40','signalL','signalR'].includes(mesh.name))mesh.layers.set(1);
-      if(mesh.name.startsWith('mirror')){this.mirrors.attach(mesh);continue;}
+      if(mesh.name.startsWith('mirror')){if(!exteriorOnly)this.mirrors.attach(mesh);continue;}
       if(wheel){
         const idx=wheelIds.indexOf(wheel[2]),w=spec.wheels[idx];
         mesh.geometry.translate(-w.x,-.330,-w.z);this.wheels[idx].roller.add(mesh);
@@ -69,10 +70,23 @@ export class CarVisual {
       mesh.castShadow=mesh.material!==glass;mesh.receiveShadow=true;
     }
     if(this.wheels.some(w=>w.roller.children.length<3)||!this.brake||!this.head)throw Error('Incomplete F40 vehicle asset');
-    fitRearBadge(body);this.poseWiper=buildWiper(body);
-    this.cabin=buildCabin(body,this.hitTargets);this.steering=this.cabin.steering;
-    await this.driver.load(this.steering.parent!);
-    this.popups=new PopupHeadlights(body);
+    fitRearBadge(body);
+    if(!exteriorOnly){
+      this.poseWiper=buildWiper(body);
+      this.cabin=buildCabin(body,this.hitTargets);this.steering=this.cabin.steering;
+      await this.driver.load(this.steering.parent!);
+    }
+    this.popups=new PopupHeadlights(body,!exteriorOnly);
+  }
+  syncExteriorLights(flags:number,dt:number){
+    this.popups.requested=Boolean(flags&lightFlags.auxiliary);
+    this.popups.step(dt);this.popups.sync(1);
+    if(this.head)this.head.emissiveIntensity=flags&lightFlags.lights?.78:.015;
+    if(this.brake)this.brake.emissiveIntensity=flags&lightFlags.brake?2.9:flags&lightFlags.lights?.52:.07;
+    if(this.reverse)this.reverse.emissiveIntensity=flags&lightFlags.reverse?1.55:0;
+    this.signals.forEach((material,i)=>{
+      material.emissiveIntensity=flags&(i?lightFlags.right:lightFlags.left)?2.4:.025;
+    });
   }
   set instrumentBrightness(value:number){this.cabin.instruments.brightness=value;}
   hit(camera:T.Camera,ndc:T.Vector2){

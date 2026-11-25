@@ -1,3 +1,5 @@
+import {Multiplayer} from './multiplayer.ts';
+import {lightFlags, type Progress, type Seat, type Session, type VehicleSample} from '../multiplayer-poc/src/game.ts';
 import {ChaseCamera,type ChasePreset} from './chase-camera.ts';
 import {installStartingGantry} from './start-gantry.ts';
 import {LapTiming,lapTime,sectorDelta,sectorTime,type SectorRating} from './lap-timing.ts';
@@ -17,7 +19,7 @@ import {installBindings,shortcutLabel,vehicleShortcuts,type ControlAction,type V
 import {installHelp,cockpitHint,controlReference} from './help.ts';
 import {Showroom} from './showroom.ts';
 import {drivingAssists,type AssistMode} from './vehicle-spec.ts';
-import { startLine, courseLength, nearestStation, section, stations, type Station } from './track.ts';
+import { startLine, lineDistance, courseLength, grid, oppositeGrid, nearestStation, sampleAt, section, stations, type Station } from './track.ts';
 import { noInput, stepTime, Vehicle, type DriverInput } from './vehicle.ts';
 
 type View = 'cockpit' | 'chase' | 'hood' | 'orbit';
@@ -102,7 +104,7 @@ function makeMinimap() {
   ctx.fillStyle = '#9ba7b2';
   ctx.fillRect(mapX(startLine.p.x)-6, mapY(startLine.p.z)-.7, 12, 1.4);
   const cameraCtx = minimap.getContext('2d')!;
-  return (x: number, z: number, direction: T.Vector3) => {
+  return (x: number, z: number, direction: T.Vector3, opponent?:T.Vector3) => {
     cameraCtx.clearRect(0, 0, width, height);
     cameraCtx.drawImage(base, 0, 0);
     cameraCtx.save();
@@ -113,6 +115,17 @@ function makeMinimap() {
     cameraCtx.closePath();
     cameraCtx.fillStyle = '#ff8a52'; cameraCtx.fill();
     cameraCtx.restore();
+    if(opponent){
+      const px=mapX(opponent.x),py=mapY(opponent.z);
+      const near=Math.hypot(px-mapX(x),py-mapY(z))<9;
+      cameraCtx.beginPath();
+      cameraCtx.arc(px,py,near?6:3.6,0,Math.PI*2);
+      if(near){cameraCtx.strokeStyle='#73d7e9';cameraCtx.lineWidth=1.5;cameraCtx.stroke();}
+      else{
+        cameraCtx.fillStyle='#73d7e9';cameraCtx.fill();
+        cameraCtx.strokeStyle='#17212a';cameraCtx.lineWidth=1.2;cameraCtx.stroke();
+      }
+    }
   };
 }
 
@@ -171,13 +184,50 @@ async function start() {
   const [,skydome,updateVegetation]=await Promise.all([visual.load(), skyPromise,environmentReady]);
   const marks=new TireMarks(scene,wear);
   let laps=loadRecords(currentVehicle);
+  let multiplayer:Multiplayer;
+  let onlineRun:Session|null=null;
+  let gridSlot:Seat=1;
+  let poseReset=0;
+  let submittedLaps=0;
   const gantry=installStartingGantry(scene);
   const showroom=new Showroom(scene.environment);
-  function driveStep(input:DriverInput){
-    car.update(input);visual.popups.step(stepTime);gantry.signal.step(stepTime);marks.update(car);
+  function driveStep(input:DriverInput,timed=true){
+    car.update(input);visual.popups.step(stepTime);marks.update(car);
+    if(!onlineRun)gantry.signal.step(stepTime);
+    if(timed)timeLap(car.current.position,car.direction,car.signedSpeed,stepTime);
+  }
+  function timeLap(position:T.Vector3,heading:T.Vector3,speed:number,dt:number){
     const count=laps.count;
-    laps.step(car.current.position,car.direction,car.signedSpeed,stepTime);
-    if(laps.count!==count)saveRecords(currentVehicle,laps);
+    laps.step(position,heading,speed,dt);
+    if(laps.count===count)return;
+    if(!onlineRun)saveRecords(currentVehicle,laps);
+    else if(laps.lastLapSectors&&multiplayer.connected){
+      const [a,b,c]=laps.lastLapSectors;
+      const first=Math.round(a*1000), second=Math.round((a+b)*1000), total=Math.round((a+b+c)*1000);
+      multiplayer.submitLap(++submittedLaps,[first,second-first,total-second]);
+    }
+  }
+  const q=(n:number,precision=1000)=>Math.round(n*precision)/precision;
+  function networkPose():VehicleSample{
+    const {position,rotation}=car.current;
+    const wheels=car.wheelState;
+    const flags=(car.brakeLight?lightFlags.brake:0)|(car.lights?lightFlags.lights:0)|
+      (visual.popups.requested?lightFlags.auxiliary:0)|(car.gear<0?lightFlags.reverse:0)|
+      (car.blink&&car.turn!==1?lightFlags.left:0)|(car.blink&&car.turn!==-1?lightFlags.right:0);
+    return {
+      position:[q(position.x),q(position.y),q(position.z)],
+      orientation:[q(rotation.x,10000),q(rotation.y,10000),q(rotation.z,10000),q(rotation.w,10000)],
+      velocity:[q(car.velocity.x),q(car.velocity.y),q(car.velocity.z)],
+      steering:[q(wheels[0].steer),q(wheels[1].steer)],
+      wheels:wheels.map(w=>q(w.spin)) as [number,number,number,number],
+      suspension:wheels.map(w=>q(w.length)) as [number,number,number,number],
+      flags,reset:poseReset,progress:q(laps.progress,10000),
+    };
+  }
+  function networkTiming():Progress{
+    return {sector:laps.currentSector,ms:laps.current===null?null:Math.round(laps.current*1000),
+      splits:laps.sectors.map(n=>n===null?null:Math.round(n*1000)) as [number|null,number|null,number|null],
+      invalid:laps.status==='invalid'};
   }
   let groundContact=groundShadow(scene,car);
   (inGarage?showroom.scene:scene).add(visual.group);
@@ -278,6 +328,10 @@ async function start() {
     canvas.style.cursor = '';
     accumulator = 0;
     byId('pause-layer').hidden = !paused;
+    setText(byId('pause-heading'), onlineRun ? 'Session continues' : 'Paused');
+    setText(byId('pause-mode-label'), onlineRun ? 'MULTIPLAYER' : 'FREE DRIVE');
+    byId('restart').hidden = Boolean(onlineRun);
+    setText(byId('pause-garage'),onlineRun?'Leave Room':'Return to garage');
     setText(byId('pause'), paused ? 'Resume' : 'Pause');
     stage.dataset.paused = String(next);
     if (next) byId('resume').focus();
@@ -307,7 +361,8 @@ async function start() {
   dialLighting.addEventListener('input',()=>{setDialLight();try{localStorage.setItem('apex.dial-lighting',dialLighting.value);}catch{}});
 
   function reset(restart = false) {
-    car.reset(restart);
+    car.reset(restart,onlineRun&&gridSlot===2?oppositeGrid:grid);
+    if(onlineRun)poseReset++;
     laps.cancel();
     if(restart){marks.clear();visual.popups.reset();gantry.signal.reset();restoreAssist();}else marks.disconnect();
     accumulator = 0;
@@ -550,7 +605,10 @@ async function start() {
   timerPanel.hidden=!timingVisible.checked;
   timingVisible.addEventListener('change',()=>{timerPanel.hidden=!timingVisible.checked;try{localStorage.setItem('apex.timing',timerPanel.hidden?'hidden':'shown');}catch{}});
   summary.addEventListener('click',()=>{timerDetails.hidden=!timerDetails.hidden;summary.setAttribute('aria-expanded',String(!timerDetails.hidden));sinceUI=1;stage.focus({preventScroll:true});});
-  byId('reset-timer').addEventListener('click',()=>{laps.reset();saveRecords(currentVehicle,laps);sinceUI=1;stage.focus({preventScroll:true});});
+  byId('reset-timer').addEventListener('click',()=>{
+    if(onlineRun)return;
+    laps.reset();saveRecords(currentVehicle,laps);sinceUI=1;stage.focus({preventScroll:true});
+  });
   const timerFields=Object.fromEntries(['state','current','count','progress','last','best','theo','history'].map(k=>[k,byId('lap-'+k)]));
   const sectorBanner=byId('sector-banner');
   const sectorCells=[0,1,2].map(i=>{
@@ -572,7 +630,7 @@ async function start() {
     if(timerPanel.hidden)return;
     const signalText=gantry.signal.phase==='countdown'?gantry.signal.count+' / 5 red lamps':gantry.signal.phase==='go'?'Lights out':'';
     setText(byId('start-light-state'),signalText);
-    (byId('test-start-lights') as HTMLButtonElement).disabled=paused||gantry.signal.phase==='countdown';
+    (byId('test-start-lights') as HTMLButtonElement).disabled=Boolean(onlineRun)||paused||gantry.signal.phase==='countdown';
     if(timerPanel.dataset.status!==laps.status)timerPanel.dataset.status=laps.status;
     setText(timerFields.state,laps.status==='running'?'Lap '+(laps.count+1):laps.status==='invalid'?laps.reason:'Cross start line');
     setText(timerFields.current,lapTime(laps.current));
@@ -653,7 +711,8 @@ ${car.spec.awd?car.tireTelemetry.map((w,i)=>['FL','FR','RL','RR'][i]+' '+w.surfa
     const signal = car.blink ? (car.turn === -1 ? '◀' : car.turn === 1 ? '▶' : car.turn === 2 ? '◀ ▶' : '') : '';
     setText(labels.signal, [car.lights ? 'LAMPS' : '', signal, car.wiper.mode==='OFF'?'':'WIPER '+car.wiper.mode].filter(Boolean).join(' · '));
     labels.tach.style.transform = `scaleX(${Math.min(1, car.rpm / car.spec.redline)})`;
-    map(car.current.position.x, car.current.position.z, car.direction);
+    map(car.current.position.x, car.current.position.z, car.direction, multiplayer.remote.visiblePosition);
+    multiplayer.renderTrack();
   }
 
   const forward = new T.Vector3(), target = new T.Vector3(), desired = new T.Vector3();
@@ -748,16 +807,24 @@ ${car.spec.awd?car.tireTelemetry.map((w,i)=>['FL','FR','RL','RR'][i]+' '+w.surfa
       }
       help.update();return;
     }
-    const active = !paused && !overlayOpen();
+    const acceptsInput = !paused && !overlayOpen() && !document.hidden;
+    const active = Boolean(onlineRun) || (!paused && !overlayOpen());
+    if(onlineRun){
+      if(elapsed>.15)laps.invalidate('Simulation interrupted');
+      gantry.signal.synchronize(onlineRun.starts-multiplayer.serverNow());
+    }
     if (active) {
-      const input = driverInput();
+      const held = onlineRun && (multiplayer.prestart || multiplayer.finished);
+      const timed = !onlineRun || (!held && !document.hidden && multiplayer.connected);
+      const input = held || (onlineRun&&!acceptsInput) ? {...noInput,handbrake:true} : driverInput();
       accumulator += dt;
       while (accumulator >= stepTime) {
-        driveStep(input);
+        driveStep(input,timed);
         accumulator -= stepTime;
       }
     }
-    audio.update(car,camera,view==='cockpit',active&&!document.hidden&&document.hasFocus());
+    if(onlineRun)multiplayer.tick(now,dt,networkPose,networkTiming);
+    audio.update(car,camera,view==='cockpit',acceptsInput&&document.hasFocus());
     if (active || frameCap > 0) {
       if (frameCap > 0) frameCap--;
       const alpha=active ? Math.min(1,accumulator/stepTime) : 1;
@@ -792,6 +859,7 @@ ${car.spec.awd?car.tireTelemetry.map((w,i)=>['FL','FR','RL','RR'][i]+' '+w.surfa
     if (event.target instanceof HTMLButtonElement && (event.code === 'Space' || event.code === 'Enter')) return;
     const key = event.code;
     if(inGarage){
+      if(multiplayer.isOpen)return;
       if(!event.repeat&&selecting&&!switching&&(key==='ArrowLeft'||key==='ArrowRight')){
         event.preventDefault();void cycleVehicle(key==='ArrowLeft'?-1:1);
       }
@@ -823,6 +891,9 @@ ${car.spec.awd?car.tireTelemetry.map((w,i)=>['FL','FR','RL','RR'][i]+' '+w.surfa
   });
   window.addEventListener('keyup', event => keys.delete(event.code));
   window.addEventListener('blur', () => { keys.clear(); looking = false; canvas.style.cursor = ''; });
+  document.addEventListener('visibilitychange',()=>{
+    if(onlineRun&&document.hidden){keys.clear();laps.invalidate('Tab suspended');}
+  });
   canvas.addEventListener('contextmenu', event => event.preventDefault());
 
   function clickTarget(clientX: number, clientY: number) {
@@ -884,7 +955,7 @@ ${car.spec.awd?car.tireTelemetry.map((w,i)=>['FL','FR','RL','RR'][i]+' '+w.surfa
   }
 
   byId('test-start-lights').addEventListener('click',()=>{
-    if(!paused)gantry.signal.begin();
+    if(!paused&&!onlineRun)gantry.signal.begin();
     sinceUI=1;
     stage.focus({preventScroll:true});
   });
@@ -892,7 +963,7 @@ ${car.spec.awd?car.tireTelemetry.map((w,i)=>['FL','FR','RL','RR'][i]+' '+w.surfa
   for (const button of viewButtons) button.addEventListener('click', () => { setView(button.dataset.camera as View); stage.focus({ preventScroll: true }); });
   byId('pause').addEventListener('click', () => setPaused(!paused));
   byId('resume').addEventListener('click', () => setPaused(false));
-  byId('restart').addEventListener('click', () => reset(true));
+  byId('restart').addEventListener('click', () => {if(!onlineRun)reset(true);});
   byId('settings').addEventListener('click', () => showDialog(settings));
   byId('controls').addEventListener('click', () => showDialog(controls));
   for (const dialog of [settings, controls]) dialog.addEventListener('close', () => {
@@ -996,8 +1067,9 @@ ${car.spec.awd?car.tireTelemetry.map((w,i)=>['FL','FR','RL','RR'][i]+' '+w.surfa
     const index=vehicleIds.indexOf(currentVehicle);
     return switchVehicle(vehicleIds[(index+direction+vehicleIds.length)%vehicleIds.length]);
   }
-  byId('open-garage').addEventListener('click',enterGarage);
-  byId('pause-garage').addEventListener('click',enterGarage);
+  const garageFromTrack=()=>{if(onlineRun)multiplayer.leave();else enterGarage();};
+  byId('open-garage').addEventListener('click',garageFromTrack);
+  byId('pause-garage').addEventListener('click',garageFromTrack);
   byId('garage-drive').addEventListener('click',enterTrack);
   byId('garage-select').addEventListener('click',()=>{selecting=!selecting;updateGarage();});
   byId('garage-settings').addEventListener('click',()=>showDialog(settings));
@@ -1048,10 +1120,57 @@ ${car.spec.awd?car.tireTelemetry.map((w,i)=>['FL','FR','RL','RR'][i]+' '+w.surfa
     frame:()=>{frameCap=4;},
     restoreBindings:bindings.restore,
   });
+  multiplayer=new Multiplayer(scene,{
+    vehicle:()=>currentVehicle,
+    changeVehicle:switchVehicle,
+    enter:(session,slot)=>{
+      onlineRun=session;
+      gridSlot=slot;
+      submittedLaps=0;
+      poseReset=0;
+      laps=new LapTiming();
+      historyShown='';
+      byId('reset-timer').hidden=true;
+      reset(true);
+      settle();
+      enterTrack();
+      car.setIgnition();
+      setText(byId('track-mode-label'),multiplayer.mode==='challenge'?'BEST LAP CHALLENGE':'ONLINE FREE DRIVE');
+      sinceUI=1;
+      stage.focus({preventScroll:true});
+    },
+    exit:()=>{
+      onlineRun=null;
+      gantry.signal.reset();
+      enterGarage();
+      laps=loadRecords(currentVehicle);
+      historyShown='';
+      submittedLaps=0;
+      byId('reset-timer').hidden=false;
+      setText(byId('track-mode-label'),'FREE DRIVE');
+      sinceUI=1;
+      byId('play-online').focus({preventScroll:true});
+    },
+    interrupted:reason=>{if(onlineRun){keys.clear();laps.invalidate(reason);}},
+    unlockAudio:()=>audio.unlock(),
+  });
   if (diagnostic) {
     Object.assign(window, { apexDiagnostics: {
       inspect:{get laps(){return laps;},marks,wear,get audio(){return audio;},gantry,
         get visual(){return visual;},get car(){return car;},renderer,camera,scene,T,updateVegetation,sun,skydome,showroom},
+      multiplayer:()=>multiplayer.diagnostics,
+      timeLapPath(speed:number,cutTrack=false){
+        if(!onlineRun||multiplayer.prestart||multiplayer.finished)throw new Error('A session must be running.');
+        laps.cancel();
+        const spacing=speed*stepTime;
+        for(let d=-.5;d<=courseLength+spacing*2;d+=spacing){
+          const {p,forward,right}=sampleAt(lineDistance+d);
+          p.y+=.33;
+          if(cutTrack&&d>25&&d<27)p.addScaledVector(right,7.2);
+          timeLap(p,forward,speed,stepTime);
+        }
+        return {count:laps.count,best:laps.best,display:laps.sectorDisplay()};
+      },
       setTestDriver(driver:(()=>DriverInput)|undefined){testDriver=driver;},
       state: () => ({
         position: car.current.position.toArray(), direction: car.direction.toArray(),

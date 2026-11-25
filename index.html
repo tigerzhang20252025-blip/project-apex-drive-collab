@@ -12,7 +12,7 @@
   <div class="shell">
     <header class="masthead">
       <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i></span><div><small>PROJECT</small><strong>APEX<span> DRIVE</span></strong></div></div>
-      <div class="header-track"><span class="header-divider" aria-hidden="true"></span><div><span>Alpine Proving Ground</span><small>FREE DRIVE</small></div></div>
+      <div class="header-track"><span class="header-divider" aria-hidden="true"></span><div><span>Alpine Proving Ground</span><small id="track-mode-label">FREE DRIVE</small></div></div>
       <div class="header-actions">
         <button class="quiet" id="open-garage" type="button">Garage</button>
         <button class="quiet" data-open-help type="button">Help</button>
@@ -49,6 +49,21 @@
           <ol id="lap-history"></ol><button id="reset-timer" type="button">Reset timer</button>
         </div>
       </aside>
+      <aside id="online-hud" aria-label="Multiplayer session" hidden>
+        <div class="online-hud-heading"><b id="online-mode-label"></b><small id="online-connection"></small></div>
+        <div id="online-clock" aria-live="polite"></div>
+        <div id="online-opponent"></div><div id="online-track-message" role="status" hidden></div>
+        <div class="online-hud-actions"><button class="text-btn" id="online-end" type="button">End session</button><button class="text-btn" id="online-track-leave" type="button">Leave Room</button></div>
+      </aside>
+      <section id="online-finish" class="pause-layer" aria-label="Challenge results" hidden>
+        <div class="pause-card online-results">
+          <div class="status-line">BEST LAP CHALLENGE</div><h1 id="online-results-heading" tabindex="-1">Session results</h1>
+          <p>Client-validated times</p>
+          <div id="online-results"></div>
+          <button class="start" id="online-return" type="button">Return to Lobby</button>
+          <button class="quiet" id="online-result-leave" type="button">Leave Room</button>
+        </div>
+      </section>
       <pre id="debug-panel" hidden></pre>
       <canvas id="minimap" width="216" height="202" aria-label="Circuit overview and vehicle position"></canvas>
       <aside id="telemetry" class="telemetry" aria-label="Vehicle instruments">
@@ -63,13 +78,18 @@
       </div>
       <div id="pause-layer" class="pause-layer" hidden>
         <div class="pause-card">
-          <div class="status-line">FREE DRIVE</div>
-          <h1>Paused</h1>
+          <div class="status-line" id="pause-mode-label">FREE DRIVE</div>
+          <h1 id="pause-heading">Paused</h1>
           <div class="pause-actions"><button class="start" id="resume" type="button">Resume driving</button><button class="quiet" id="restart" type="button">Restart session</button><button class="quiet" data-open-help type="button">Help / Tutorial</button><button class="quiet" id="pause-garage" type="button">Return to garage</button></div>
         </div>
       </div>
       <section class="garage" id="garage" aria-label="Vehicle garage" hidden>
         <div class="garage-panel">
+          <div class="garage-mode" role="group" aria-label="Play mode">
+            <button class="quiet" id="play-solo" type="button" aria-pressed="true">Single Player</button>
+            <button class="quiet" id="play-online" type="button" aria-pressed="false">Multiplayer</button>
+          </div>
+          <div id="garage-solo">
           <p class="garage-kicker" id="garage-trim"></p>
           <h1 id="garage-name"></h1>
           <p class="garage-description" id="garage-description"></p>
@@ -86,6 +106,35 @@
             <button class="quiet" data-open-help type="button">Help</button><button class="quiet" id="garage-settings" type="button">Settings</button>
           </div>
           <a id="garage-credits" class="garage-credits" target="_blank" rel="noreferrer">Vehicle asset credits</a>
+          </div>
+          <section id="online-lobby" aria-label="Multiplayer lobby" hidden>
+            <p class="garage-kicker">Alpine Proving Ground</p>
+            <h1>Multiplayer</h1>
+            <div id="online-entry">
+              <label for="online-name">Driver name <small>optional</small></label>
+              <input id="online-name" maxlength="20" autocomplete="off" placeholder="Driver">
+              <button class="start" id="online-create" type="button">Create Room</button>
+              <form id="online-join">
+                <label for="online-code-input">Invite code</label>
+                <input id="online-code-input" maxlength="9" required autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX">
+                <button class="quiet" type="submit">Join Room</button>
+              </form>
+            </div>
+            <div id="online-room" hidden>
+              <div class="online-code"><div><small>ROOM CODE</small><b id="online-code"></b></div><button class="quiet" id="online-copy" type="button">Copy code</button></div>
+              <div class="online-selects">
+                <label>Vehicle<select id="online-vehicle"><option value="f40">Ferrari F40</option><option value="r35">Nissan GT-R R35</option></select></label>
+                <label>Session mode<select id="online-mode"><option value="drive">Free Drive</option><option value="challenge">Best Lap Challenge</option></select></label>
+              </div>
+              <ul id="online-drivers" aria-label="Connected drivers"></ul>
+              <div class="online-actions">
+                <button class="quiet" id="online-leave" type="button">Leave Room</button>
+                <button class="quiet" id="online-ready" type="button">Ready</button>
+                <button class="start" id="online-start" type="button">Start Session</button>
+              </div>
+            </div>
+            <p class="online-status" id="online-status" role="status"></p>
+          </section>
         </div>
         <div class="garage-view" aria-label="Showroom camera">
           <p>Drag to orbit · Scroll to zoom</p>

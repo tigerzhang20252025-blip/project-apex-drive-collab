@@ -4,7 +4,7 @@ import type {Switch} from './f40-cabin.ts';
 import {isSharedCabinTexture} from './finishes.ts';
 
 export type VehicleVisual = Pick<CarVisual,
-  'group'|'eye'|'hood'|'hitTargets'|'wheels'|'mirrors'|'driver'|'steering'|'instrumentBrightness'|'hit'|'sync'|'load'
+  'group'|'eye'|'hood'|'hitTargets'|'wheels'|'mirrors'|'driver'|'steering'|'instrumentBrightness'|'hit'|'sync'|'load'|'syncExteriorLights'
 > & {
   popups:{requested:boolean;step(dt:number):void;sync(alpha:number):void;reset():void};
   readonly studioLighting?:boolean;

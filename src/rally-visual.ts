@@ -12,6 +12,7 @@ import {buildRallyTrim,buildRearOptics,carbonUV,finishNose,fitFuelDoor,fitRearBa
 import {rallyWheelSet} from './rally-wheel.ts';
 import {buildRallyCabin} from './rally-cabin.ts';
 import {rallyControlHints} from './rally-controls.ts';
+import {lightFlags} from '../multiplayer-poc/src/game.ts';
 import type {Vehicle} from './vehicle.ts';
 import type {Switch} from './f40-cabin.ts';
 import type {VehicleVisual} from './vehicle-visual.ts';
@@ -106,7 +107,7 @@ export class RallyVisual implements VehicleVisual {
     this.group.name='Nissan GT-R R35 Rally';
   }
 
-  async load(){
+  async load(exteriorOnly=false){
     const {scene:body}=await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(asset('r35-rally.glb'));
     body.rotation.y=Math.PI;body.position.y=this.trim.position.y;this.group.add(body,this.trim);
     this.group.updateMatrixWorld(true);
@@ -171,7 +172,7 @@ export class RallyVisual implements VehicleVisual {
       const decal=part(this.group,new DecalGeometry(door,projection,orient,dimensions),rallyLivery(side<0));
       decal.castShadow=false;decal.renderOrder=1;
     }
-    for(const original of mirrors){
+    for(const original of exteriorOnly?[]:mirrors){
       const material=original.material as T.Material;
       const mesh=original.clone();
       const geometry=mesh.geometry.clone(),positions=geometry.getAttribute('position');
@@ -192,7 +193,7 @@ export class RallyVisual implements VehicleVisual {
     this.head.add(nose.LED);
     fitRearBadges(this.group,rearPanels);
     fitFuelDoor(this.group,paintedPanels);
-    this.cabin=buildRallyCabin(this.trim,body,this.hitTargets);
+    if(!exteriorOnly)this.cabin=buildRallyCabin(this.trim,body,this.hitTargets);
     batchRallyShell(body,this.group);
     const hubNames=['HubFL','HubFR','HubRL','HubRR'];
     const buildWheel=rallyWheelSet(this.spec.radius);
@@ -204,10 +205,21 @@ export class RallyVisual implements VehicleVisual {
     });
     const lamps=buildRallyTrim(this.trim,carbon);
     this.popups=new AuxiliaryLamps(nose.core);this.signals=lamps.signals;
-    this.steering=this.cabin.steering;
-    await this.driver.load(this.cabin.column);
-    this.buildWipers();
+    if(!exteriorOnly){
+      this.steering=this.cabin.steering;
+      await this.driver.load(this.cabin.column);
+      this.buildWipers();
+    }
     if(doors.length!==2||mirrors.length!==3||!this.head.size||!this.tail.size)throw Error('Incomplete R35 vehicle model');
+  }
+
+  syncExteriorLights(flags:number,dt:number){
+    this.popups.requested=Boolean(flags&lightFlags.auxiliary);
+    this.popups.step(dt);this.popups.sync();
+    for(const mat of this.head)mat.emissiveIntensity=flags&lightFlags.lights?1.25:.04;
+    for(const mat of this.tail)mat.emissiveIntensity=flags&lightFlags.brake?2.45:flags&lightFlags.lights?.64:.16;
+    for(const mat of this.brake)mat.emissiveIntensity=flags&lightFlags.brake?1.55:.025;
+    this.signals.forEach((mat,i)=>{mat.emissiveIntensity=flags&(i?lightFlags.right:lightFlags.left)?1.8:.045;});
   }
 
   private buildWipers(){

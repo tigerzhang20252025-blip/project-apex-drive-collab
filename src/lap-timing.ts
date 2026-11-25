@@ -274,7 +274,7 @@ export class LapTiming {
     this.lastLapSectors=null;
   }
 
-  private invalidate(reason:string){
+  invalidate(reason:string){
     if(this.status==='running'){
       this.status='invalid';
       this.reason=reason;

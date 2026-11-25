@@ -172,8 +172,8 @@ export class Vehicle {
     this.shiftTime = target > 0 ? this.spec.shiftCut : .10;
   }
 
-  reset(restart = false) {
-    this.body.setTranslation({ x: grid.x, y: grid.y + this.spec.bodyOrigin + .035, z: grid.z }, true);
+  reset(restart = false, spawn = grid) {
+    this.body.setTranslation({ x: spawn.x, y: spawn.y + this.spec.bodyOrigin + .035, z: spawn.z }, true);
     this.body.setRotation(gridRotation, true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
